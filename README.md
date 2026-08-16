@@ -1,5 +1,10 @@
 # ProjectBar
 
+Dont lose focus. Track agents you want to run per project per day.
+
+<img width="1200" height="860" alt="d971875a-09ff-46e7-834d-2cce30533a38" src="https://github.com/user-attachments/assets/438356e3-8bf5-430a-b3fc-9128de5f87a6" />
+
+
 ProjectBar is a native macOS menu bar app for keeping agent work moving across projects. Each project has a daily agent-run target, an evenly divided 10:00–20:00 local-time cadence, and a two-tap run workflow.
 
 ## How it works
