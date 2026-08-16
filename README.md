@@ -29,6 +29,26 @@ make run
 
 `make app` creates an ad-hoc signed `ProjectBar.app` in the repository root.
 
+### Install a Mac build
+
+```sh
+make install
+```
+
+This creates a signed release build, installs it at `~/Applications/ProjectBar.app`, and launches it. Re-run the command after rebuilding to replace the installed copy at the same stable path.
+
+To install in the system Applications folder instead, use `PROJECTBAR_INSTALL_DIR=/Applications make install`; macOS may request administrator permission.
+
+### Launch at login
+
+After installing the build, open ProjectBar from the menu bar, choose **Settings…**, and enable **Launch ProjectBar at login**. ProjectBar uses the native macOS Login Items service. If macOS requires approval, the settings panel links directly to the Login Items screen in System Settings.
+
+To install the release build and request launch-at-login registration in one step, run:
+
+```sh
+make install-startup
+```
+
 ## Cadence example
 
 A target of 10 runs/day creates checkpoints at 10:30, 11:30, …, 19:30. A target of 100 creates one checkpoint every six minutes, centered at 10:03, 10:09, …, 19:57.

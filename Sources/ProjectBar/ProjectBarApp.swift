@@ -22,10 +22,20 @@ struct ProjectBarApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
+    private let launchAtLogin = LaunchAtLoginManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        self.statusItemController = StatusItemController(store: ProjectStore())
+        if CommandLine.arguments.contains("--enable-launch-at-login") {
+            self.launchAtLogin.setEnabled(true)
+        }
+        self.statusItemController = StatusItemController(
+            store: ProjectStore(),
+            launchAtLogin: self.launchAtLogin)
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        self.launchAtLogin.refresh()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -5,11 +5,13 @@ import SwiftUI
 @MainActor
 struct ProjectBoardView: View {
     let store: ProjectStore
+    let launchAtLogin: LaunchAtLoginManager
     let onClose: () -> Void
 
     @State private var nameEditor: ProjectNameEditorRequest?
     @State private var settingsProject: ProjectRecord?
     @State private var pendingRemoval: ProjectRecord?
+    @State private var showingAppSettings = false
 
     private let columns = Array(
         repeating: GridItem(.flexible(minimum: 220, maximum: 260), spacing: 12, alignment: .top),
@@ -49,6 +51,9 @@ struct ProjectBoardView: View {
                 self.store.renameProject(id: project.id, to: name)
                 self.store.setDailyTarget(dailyTarget, forProjectID: project.id)
             }
+        }
+        .sheet(isPresented: self.$showingAppSettings) {
+            AppSettingsView(launchAtLogin: self.launchAtLogin)
         }
         .alert(item: self.$pendingRemoval) { project in
             Alert(
@@ -226,6 +231,10 @@ struct ProjectBoardView: View {
                     .applicationVersion: "0.1.0",
                     .credits: NSAttributedString(string: "A calm daily cadence for agent work."),
                 ])
+            }
+            .buttonStyle(.plain)
+            Button("Settings…") {
+                self.showingAppSettings = true
             }
             .buttonStyle(.plain)
             Button("Quit") {

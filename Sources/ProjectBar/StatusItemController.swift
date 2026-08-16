@@ -5,12 +5,18 @@ import SwiftUI
 @MainActor
 final class StatusItemController: NSObject {
     private let store: ProjectStore
+    private let launchAtLogin: LaunchAtLoginManager
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private var timer: Timer?
 
-    init(store: ProjectStore, statusBar: NSStatusBar = .system) {
+    init(
+        store: ProjectStore,
+        launchAtLogin: LaunchAtLoginManager,
+        statusBar: NSStatusBar = .system)
+    {
         self.store = store
+        self.launchAtLogin = launchAtLogin
         self.statusItem = statusBar.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -56,6 +62,7 @@ final class StatusItemController: NSObject {
         self.popover.contentSize = self.desiredPopoverSize
         self.popover.contentViewController = NSHostingController(rootView: ProjectBoardView(
             store: self.store,
+            launchAtLogin: self.launchAtLogin,
             onClose: { [weak self] in
                 self?.popover.close()
             }))
