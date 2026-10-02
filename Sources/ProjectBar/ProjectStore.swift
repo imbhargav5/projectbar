@@ -6,7 +6,7 @@ import ProjectBarCore
 @MainActor
 @Observable
 final class ProjectStore {
-    static let dailyTargetRange = 1...200
+    static let targetRange = ProjectTargetInput.range
 
     private(set) var projects: [ProjectRecord] = []
     private(set) var now = Date()
@@ -20,18 +20,21 @@ final class ProjectStore {
         self.load()
     }
 
-    var totalDailyTarget: Int {
-        self.projects.reduce(0) { $0 + $1.dailyRunTarget }
+    var totalTarget: Int {
+        self.projects.reduce(0) { $0 + $1.runTarget }
     }
 
-    var completedToday: Int {
+    var completedInCurrentPeriods: Int {
         let calendar = Calendar.autoupdatingCurrent
         return self.projects.reduce(0) { total, project in
-            total + project.completedRunCount(on: self.now, calendar: calendar)
+            total + project.completedRunCount(
+                in: project.cadencePeriod,
+                containing: self.now,
+                calendar: calendar)
         }
     }
 
-    var expectedToday: Int {
+    var expectedNow: Int {
         let calendar = Calendar.autoupdatingCurrent
         return self.projects.reduce(0) { total, project in
             total + ProjectCadence.snapshot(for: project, at: self.now, calendar: calendar).expected
@@ -58,7 +61,12 @@ final class ProjectStore {
         self.projects.first { $0.id == id }
     }
 
-    func addProject(name: String, folderPath: String? = nil, dailyTarget: Int = 10) {
+    func addProject(
+        name: String,
+        folderPath: String? = nil,
+        dailyTarget: Int = 10,
+        cadencePeriod: CadencePeriod = .daily)
+    {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
 
@@ -72,7 +80,8 @@ final class ProjectStore {
         self.projects.append(ProjectRecord(
             name: trimmedName,
             folderPath: folderPath,
-            dailyRunTarget: Self.clampTarget(dailyTarget)))
+            dailyRunTarget: Self.clampTarget(dailyTarget),
+            cadencePeriod: cadencePeriod))
         self.commitChange()
     }
 
@@ -109,15 +118,31 @@ final class ProjectStore {
     }
 
     func setDailyTarget(_ target: Int, forProjectID id: UUID) {
+        guard let project = self.project(withID: id) else { return }
+        self.setCadence(project.cadencePeriod, target: target, forProjectID: id)
+    }
+
+    func setCadence(_ period: CadencePeriod, target: Int, forProjectID id: UUID) {
         guard let index = self.projects.firstIndex(where: { $0.id == id }) else { return }
         let target = Self.clampTarget(target)
-        guard self.projects[index].dailyRunTarget != target else { return }
-        self.projects[index].dailyRunTarget = target
+        guard self.projects[index].runTarget != target || self.projects[index].cadencePeriod != period else {
+            return
+        }
+        self.projects[index].runTarget = target
+        self.projects[index].cadencePeriod = period
         self.commitChange()
     }
 
     func startOrCompleteRun(forProjectID id: UUID, at date: Date? = nil) {
-        guard let index = self.projects.firstIndex(where: { $0.id == id }) else { return }
+        guard let project = self.project(withID: id) else { return }
+        self.performRunAction(forProjectID: id, expectedActiveRunID: project.activeRun?.id, at: date)
+    }
+
+    /// The action describes the state the user actually saw, making stale or repeated actions harmless.
+    @discardableResult
+    func performRunAction(forProjectID id: UUID, expectedActiveRunID: UUID?, at date: Date? = nil) -> Bool {
+        guard let index = self.projects.firstIndex(where: { $0.id == id }),
+              self.projects[index].activeRun?.id == expectedActiveRunID else { return false }
         let eventDate = date ?? Date()
         if let activeRun = self.projects[index].activeRun {
             self.projects[index].completedRuns.append(CompletedAgentRun(
@@ -130,6 +155,7 @@ final class ProjectStore {
         }
         self.now = eventDate
         self.commitChange()
+        return true
     }
 
     func cancelActiveRun(forProjectID id: UUID) {
@@ -142,7 +168,11 @@ final class ProjectStore {
     func undoLastCompletedRun(forProjectID id: UUID) {
         guard let index = self.projects.firstIndex(where: { $0.id == id }) else { return }
         let calendar = Calendar.autoupdatingCurrent
-        guard let run = self.projects[index].lastCompletedRun(on: self.now, calendar: calendar),
+        let project = self.projects[index]
+        guard let run = project.lastCompletedRun(
+            in: project.cadencePeriod,
+            containing: self.now,
+            calendar: calendar),
               let runIndex = self.projects[index].completedRuns.firstIndex(where: { $0.id == run.id })
         else { return }
         self.projects[index].completedRuns.remove(at: runIndex)
@@ -156,8 +186,18 @@ final class ProjectStore {
         self.commitChange()
     }
 
+    /// Undo the run named by the completion notice, even if another run has since started
+    /// or the calendar period has rolled over.
+    func undoCompletedRun(id runID: UUID, forProjectID projectID: UUID) {
+        guard let index = self.projects.firstIndex(where: { $0.id == projectID }),
+              let runIndex = self.projects[index].completedRuns.firstIndex(where: { $0.id == runID })
+        else { return }
+        self.projects[index].completedRuns.remove(at: runIndex)
+        self.commitChange()
+    }
+
     private static func clampTarget(_ target: Int) -> Int {
-        min(Self.dailyTargetRange.upperBound, max(Self.dailyTargetRange.lowerBound, target))
+        min(Self.targetRange.upperBound, max(Self.targetRange.lowerBound, target))
     }
 
     private static func defaultPersistenceURL() -> URL {

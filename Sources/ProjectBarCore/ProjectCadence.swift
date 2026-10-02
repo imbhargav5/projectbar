@@ -1,5 +1,23 @@
 import Foundation
 
+public extension CadencePeriod {
+    func interval(containing date: Date, calendar: Calendar) -> DateInterval {
+        let component: Calendar.Component = switch self {
+        case .daily: .day
+        case .weekly: .weekOfYear
+        }
+        if let interval = calendar.dateInterval(of: component, for: date) {
+            return interval
+        }
+
+        let start = calendar.startOfDay(for: date)
+        let dayCount = self == .daily ? 1 : 7
+        let end = calendar.date(byAdding: .day, value: dayCount, to: start)
+            ?? start.addingTimeInterval(Double(dayCount) * 24 * 60 * 60)
+        return DateInterval(start: start, end: end)
+    }
+}
+
 public struct WorkdaySchedule: Equatable, Sendable {
     public let startHour: Int
     public let endHour: Int
@@ -22,29 +40,78 @@ public struct WorkdaySchedule: Equatable, Sendable {
     public func scheduledDate(
         forRunNumber runNumber: Int,
         target: Int,
+        period: CadencePeriod = .daily,
         on date: Date,
         calendar: Calendar)
         -> Date?
     {
         guard target > 0, (1...target).contains(runNumber) else { return nil }
-        let workday = self.interval(containing: date, calendar: calendar)
-        let checkpoint = (Double(runNumber) - 0.5) / Double(target)
-        return workday.start.addingTimeInterval(workday.duration * checkpoint)
+        let workIntervals = self.intervals(for: period, containing: date, calendar: calendar)
+        let totalDuration = workIntervals.reduce(0) { $0 + $1.duration }
+        guard totalDuration > 0 else { return nil }
+
+        var offset = totalDuration * (Double(runNumber) - 0.5) / Double(target)
+        for interval in workIntervals {
+            if offset < interval.duration {
+                return interval.start.addingTimeInterval(offset)
+            }
+            offset -= interval.duration
+        }
+        return workIntervals.last?.end
     }
 
-    public func expectedRunCount(at date: Date, target: Int, calendar: Calendar) -> Int {
+    public func expectedRunCount(
+        at date: Date,
+        target: Int,
+        period: CadencePeriod = .daily,
+        calendar: Calendar)
+        -> Int
+    {
         guard target > 0 else { return 0 }
-        let workday = self.interval(containing: date, calendar: calendar)
-        if date < workday.start {
-            return 0
-        }
-        if date >= workday.end {
-            return target
-        }
-
-        let elapsed = date.timeIntervalSince(workday.start)
-        let progress = elapsed / workday.duration
+        let progress = self.progress(at: date, period: period, calendar: calendar)
         return min(target, max(0, Int(floor(progress * Double(target) + 0.5))))
+    }
+
+    public func progress(
+        at date: Date,
+        period: CadencePeriod = .daily,
+        calendar: Calendar)
+        -> Double
+    {
+        let workIntervals = self.intervals(for: period, containing: date, calendar: calendar)
+        let totalDuration = workIntervals.reduce(0) { $0 + $1.duration }
+        guard totalDuration > 0 else { return 0 }
+
+        let elapsed = workIntervals.reduce(0.0) { partialResult, interval in
+            if date <= interval.start {
+                return partialResult
+            }
+            if date >= interval.end {
+                return partialResult + interval.duration
+            }
+            return partialResult + date.timeIntervalSince(interval.start)
+        }
+        return min(1, max(0, elapsed / totalDuration))
+    }
+
+    public func intervals(
+        for period: CadencePeriod,
+        containing date: Date,
+        calendar: Calendar)
+        -> [DateInterval]
+    {
+        let cadenceInterval = period.interval(containing: date, calendar: calendar)
+        var intervals: [DateInterval] = []
+        var day = calendar.startOfDay(for: cadenceInterval.start)
+
+        while day < cadenceInterval.end {
+            intervals.append(self.interval(containing: day, calendar: calendar))
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day), nextDay > day else {
+                break
+            }
+            day = nextDay
+        }
+        return intervals
     }
 }
 
@@ -55,13 +122,14 @@ public enum WorkdayPhase: Equatable, Sendable {
 }
 
 public struct CadenceSnapshot: Equatable, Sendable {
+    public let period: CadencePeriod
     public let target: Int
     public let completed: Int
     public let expected: Int
     public let behind: Int
     public let phase: WorkdayPhase
     public let nextDueDate: Date?
-    public let workdayProgress: Double
+    public let periodProgress: Double
 
     public var isComplete: Bool {
         self.completed >= self.target
@@ -86,22 +154,23 @@ public enum ProjectCadence {
         schedule: WorkdaySchedule = WorkdaySchedule())
         -> CadenceSnapshot
     {
-        let target = max(1, project.dailyRunTarget)
-        let completed = project.completedRunCount(on: date, calendar: calendar)
-        let expected = schedule.expectedRunCount(at: date, target: target, calendar: calendar)
+        let period = project.cadencePeriod
+        let target = max(1, project.runTarget)
+        let completed = project.completedRunCount(in: period, containing: date, calendar: calendar)
+        let expected = schedule.expectedRunCount(
+            at: date,
+            target: target,
+            period: period,
+            calendar: calendar)
         let workday = schedule.interval(containing: date, calendar: calendar)
         let phase: WorkdayPhase
-        let progress: Double
 
         if date < workday.start {
             phase = .beforeWork
-            progress = 0
         } else if date >= workday.end {
             phase = .afterWork
-            progress = 1
         } else {
             phase = .working
-            progress = min(1, max(0, date.timeIntervalSince(workday.start) / workday.duration))
         }
 
         let nextRunNumber = min(completed + 1, target)
@@ -110,16 +179,18 @@ public enum ProjectCadence {
             : schedule.scheduledDate(
                 forRunNumber: nextRunNumber,
                 target: target,
+                period: period,
                 on: date,
                 calendar: calendar)
 
         return CadenceSnapshot(
+            period: period,
             target: target,
             completed: completed,
             expected: expected,
             behind: max(0, expected - completed),
             phase: phase,
             nextDueDate: nextDueDate,
-            workdayProgress: progress)
+            periodProgress: schedule.progress(at: date, period: period, calendar: calendar))
     }
 }

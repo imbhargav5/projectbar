@@ -6,6 +6,8 @@ struct ProjectCadenceTests {
     private let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Kolkata")!
+        calendar.firstWeekday = 2
+        calendar.minimumDaysInFirstWeek = 4
         return calendar
     }()
 
@@ -120,6 +122,84 @@ struct ProjectCadenceTests {
             at: self.date(hour: 15),
             target: 1,
             calendar: self.calendar) == 1)
+    }
+
+    @Test("Weekly checkpoints span seven local workday windows")
+    func weeklyCadence() {
+        let schedule = WorkdaySchedule()
+
+        #expect(schedule.scheduledDate(
+            forRunNumber: 1,
+            target: 7,
+            period: .weekly,
+            on: self.date(day: 17, hour: 8),
+            calendar: self.calendar) == self.date(day: 17, hour: 15))
+        #expect(schedule.scheduledDate(
+            forRunNumber: 4,
+            target: 7,
+            period: .weekly,
+            on: self.date(day: 17, hour: 8),
+            calendar: self.calendar) == self.date(day: 20, hour: 15))
+        #expect(schedule.expectedRunCount(
+            at: self.date(day: 19, hour: 14, minute: 59),
+            target: 7,
+            period: .weekly,
+            calendar: self.calendar) == 2)
+        #expect(schedule.expectedRunCount(
+            at: self.date(day: 19, hour: 15),
+            target: 7,
+            period: .weekly,
+            calendar: self.calendar) == 3)
+    }
+
+    @Test("Weekly progress pauses overnight and completions reset next week")
+    func weeklyBoundaries() {
+        let mondayCompletion = self.date(day: 17, hour: 16)
+        let project = ProjectRecord(
+            name: "Weekly Project",
+            dailyRunTarget: 7,
+            cadencePeriod: .weekly,
+            completedRuns: [self.run(completedAt: mondayCompletion)])
+        let schedule = WorkdaySchedule()
+
+        #expect(schedule.expectedRunCount(
+            at: self.date(day: 17, hour: 20),
+            target: 7,
+            period: .weekly,
+            calendar: self.calendar) == 1)
+        #expect(schedule.expectedRunCount(
+            at: self.date(day: 18, hour: 9),
+            target: 7,
+            period: .weekly,
+            calendar: self.calendar) == 1)
+        #expect(project.completedRunCount(
+            in: .weekly,
+            containing: self.date(day: 18, hour: 9),
+            calendar: self.calendar) == 1)
+        #expect(project.completedRunCount(
+            in: .weekly,
+            containing: self.date(day: 24, hour: 0),
+            calendar: self.calendar) == 0)
+    }
+
+    @Test("Saved projects without a cadence period remain daily")
+    func legacyProjectDecoding() throws {
+        let json = """
+        {
+          "id": "67E55044-10B1-426F-9247-BB680E5FE0C8",
+          "name": "Legacy Project",
+          "dailyRunTarget": 10,
+          "createdAt": "2026-08-17T04:30:00Z",
+          "completedRuns": []
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let project = try decoder.decode(ProjectRecord.self, from: Data(json.utf8))
+
+        #expect(project.cadencePeriod == .daily)
+        #expect(project.runTarget == 10)
     }
 
     private func date(

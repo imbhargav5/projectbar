@@ -8,20 +8,8 @@ struct AppSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 10) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.tint)
-                    .frame(width: 34, height: 34)
-                    .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("ProjectBar Settings")
-                        .font(.title3.weight(.semibold))
-                    Text("Application behavior")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            ProjectSettingsHeading(
+                title: "ProjectBar Settings", subtitle: "Application behavior", symbol: "gearshape")
 
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Launch ProjectBar at login", isOn: self.launchAtLoginBinding)
@@ -44,7 +32,7 @@ struct AppSettingsView: View {
                 }
             }
             .padding(14)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .modifier(ProjectSurface())
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack {
@@ -81,8 +69,9 @@ struct AppSettingsView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(22)
+        .padding(24)
         .frame(width: 480)
+        .background(ProjectBarStyle.canvas)
         .onAppear {
             self.launchAtLogin.refresh()
         }

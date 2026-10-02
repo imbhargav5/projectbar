@@ -12,9 +12,13 @@ struct ProjectCardPresentation: Equatable {
     let visualState: VisualState
     let statusText: String
     let statusSymbol: String
-    let actionTitle: String
-    let actionSymbol: String
-    let isActionProminent: Bool
+    let timingText: String
+    let progressText: String
+    let expectedText: String
+
+    var actionTitle: String { self.visualState == .active ? "Mark complete" : "Mark started" }
+    var actionSymbol: String { self.visualState == .active ? "checkmark" : "play" }
+    var isActionProminent: Bool { self.visualState == .active }
 
     static func make(
         project: ProjectRecord,
@@ -24,88 +28,55 @@ struct ProjectCardPresentation: Equatable {
         timeDescription: (Date) -> String)
         -> ProjectCardPresentation
     {
-        let lastRun = project.mostRecentCompletedRun
+        let lastText = project.mostRecentCompletedRun.map { "Last \(relativeDescription($0.completedAt))" }
+        let progressText = "\(cadence.completed)/\(cadence.target) \(cadence.period == .daily ? "today" : "this week")"
+        let expectedText = "\(cadence.expected) expected by now"
+        let state: VisualState
+        let status: String
+        let symbol: String
+        let timing: String
 
         if let activeRun = project.activeRun {
-            let stillDue = max(0, cadence.behind - 1)
-            let backlog = stillDue > 0
-                ? " · \(stillDue) still due"
-                : ""
-            return ProjectCardPresentation(
-                visualState: .active,
-                statusText: "Running \(elapsedDescription(activeRun.startedAt))\(backlog)",
-                statusSymbol: "bolt.horizontal.circle.fill",
-                actionTitle: "Confirm complete",
-                actionSymbol: "checkmark",
-                isActionProminent: true)
-        }
-
-        if cadence.isComplete {
-            return ProjectCardPresentation(
-                visualState: .complete,
-                statusText: Self.join(
-                    "Complete",
-                    lastRun.map { "Last \(relativeDescription($0.completedAt))" }) ?? "Complete",
-                statusSymbol: "checkmark.circle.fill",
-                actionTitle: "Start another",
-                actionSymbol: "bolt.fill",
-                isActionProminent: false)
-        }
-
-        if cadence.behind > 0 {
-            let dueText = cadence.phase == .afterWork
-                ? "\(cadence.behind) short today"
-                : "\(cadence.behind) due now"
-            return ProjectCardPresentation(
-                visualState: .overdue,
-                statusText: Self.join(
-                    dueText,
-                    lastRun.map { "Last \(relativeDescription($0.completedAt))" }) ?? dueText,
-                statusSymbol: "exclamationmark.circle.fill",
-                actionTitle: "Start due agent",
-                actionSymbol: "bolt.fill",
-                isActionProminent: true)
-        }
-
-        if cadence.phase == .beforeWork, let nextDueDate = cadence.nextDueDate {
-            let scheduleText = cadence.completed == 0
-                ? "Starts at \(timeDescription(nextDueDate))"
-                : "Next at \(timeDescription(nextDueDate))"
-            return ProjectCardPresentation(
-                visualState: .normal,
-                statusText: Self.join(
-                    scheduleText,
-                    lastRun.map { "Last \(relativeDescription($0.completedAt))" }) ?? scheduleText,
-                statusSymbol: "clock",
-                actionTitle: "Start agent",
-                actionSymbol: "bolt.fill",
-                isActionProminent: false)
-        }
-
-        let lastText = lastRun.map { "Last \(relativeDescription($0.completedAt))" }
-        let nextText = cadence.nextDueDate.map { "Next \(relativeDescription($0))" }
-        return ProjectCardPresentation(
-            visualState: .normal,
-            statusText: Self.join(lastText, nextText) ?? "On cadence",
-            statusSymbol: "clock",
-            actionTitle: "Start agent",
-            actionSymbol: "bolt.fill",
-            isActionProminent: false)
-    }
-
-    private static func join(_ first: String?, _ second: String?) -> String? {
-        [first, second]
-            .compactMap { value in
-                guard let value, !value.isEmpty else { return nil }
-                return value
+            state = .active
+            status = "Running · \(elapsedDescription(activeRun.startedAt))"
+            symbol = "bolt.horizontal.circle"
+            timing = cadence.behind > 0
+                ? "\(cadence.behind) behind pace · 1 in progress"
+                : lastText ?? "Manually tracked run"
+        } else if cadence.isComplete {
+            state = .complete
+            status = "Target complete"
+            symbol = "checkmark.circle"
+            timing = lastText ?? "You’ve reached your target"
+        } else if cadence.behind > 0 {
+            state = .overdue
+            if cadence.period == .daily, cadence.phase == .afterWork {
+                status = "\(cadence.behind) short today"
+            } else if cadence.period == .weekly, cadence.periodProgress >= 1 {
+                status = "\(cadence.behind) short this week"
+            } else {
+                status = "\(cadence.behind) behind pace"
             }
-            .joined(separator: " · ")
-            .nilIfEmpty
-    }
-}
+            symbol = "clock.badge.exclamationmark"
+            timing = lastText ?? "No completed runs yet"
+        } else {
+            state = .normal
+            status = cadence.phase == .beforeWork ? "Scheduled" : "On pace"
+            symbol = "clock"
+            let nextText = cadence.nextDueDate.map {
+                cadence.phase == .beforeWork
+                    ? "Next at \(timeDescription($0))"
+                    : "Next \(relativeDescription($0))"
+            }
+            timing = [nextText, lastText].compactMap { $0 }.joined(separator: " · ")
+        }
 
-private extension String {
-    var nilIfEmpty: String? {
-        self.isEmpty ? nil : self
+        return ProjectCardPresentation(
+            visualState: state,
+            statusText: status,
+            statusSymbol: symbol,
+            timingText: timing,
+            progressText: progressText,
+            expectedText: expectedText)
     }
 }

@@ -6,6 +6,7 @@ import SwiftUI
 final class StatusItemController: NSObject {
     private let store: ProjectStore
     private let launchAtLogin: LaunchAtLoginManager
+    private let preferences = ProjectBoardPreferences()
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private var timer: Timer?
@@ -63,6 +64,8 @@ final class StatusItemController: NSObject {
         self.popover.contentViewController = NSHostingController(rootView: ProjectBoardView(
             store: self.store,
             launchAtLogin: self.launchAtLogin,
+            preferences: self.preferences,
+            onShow: { [weak self] in self?.showPopover() },
             onClose: { [weak self] in
                 self?.popover.close()
             }))
@@ -73,6 +76,11 @@ final class StatusItemController: NSObject {
             self.popover.performClose(nil)
             return
         }
+        self.showPopover()
+    }
+
+    private func showPopover() {
+        guard !self.popover.isShown else { return }
         guard let button = self.statusItem.button else { return }
         self.store.tick()
         self.popover.contentSize = self.desiredPopoverSize
@@ -89,7 +97,6 @@ final class StatusItemController: NSObject {
 
         let now = self.store.now
         let calendar = Calendar.autoupdatingCurrent
-        let schedule = WorkdaySchedule()
         var candidates: [Date] = []
 
         if let minuteBoundary = calendar.nextDate(
@@ -104,16 +111,8 @@ final class StatusItemController: NSObject {
         }
 
         for project in self.store.projects {
-            let expected = schedule.expectedRunCount(
-                at: now,
-                target: project.dailyRunTarget,
-                calendar: calendar)
-            guard expected < project.dailyRunTarget,
-                  let checkpoint = schedule.scheduledDate(
-                    forRunNumber: expected + 1,
-                    target: project.dailyRunTarget,
-                    on: now,
-                    calendar: calendar),
+            let cadence = ProjectCadence.snapshot(for: project, at: now, calendar: calendar)
+            guard let checkpoint = cadence.nextDueDate,
                   checkpoint > now
             else { continue }
             candidates.append(checkpoint)
@@ -130,28 +129,25 @@ final class StatusItemController: NSObject {
 
     private func updateStatusItem() {
         guard let button = self.statusItem.button else { return }
+        let board = ProjectBoardPresentation(projects: self.store.projects, now: self.store.now)
         let imageName: String
-        let title: String
 
         if self.store.projects.isEmpty {
             imageName = "rectangle.3.group.fill"
-            title = ""
         } else if self.store.runsBehind > 0 {
             imageName = "exclamationmark.square.fill"
-            title = " \(self.store.runsBehind) due"
         } else if self.store.activeRunCount > 0 {
             imageName = "bolt.horizontal.circle.fill"
-            title = " \(self.store.activeRunCount) running"
         } else {
             imageName = "rectangle.3.group.fill"
-            title = " \(self.store.completedToday)/\(self.store.totalDailyTarget)"
         }
 
         let image = NSImage(systemSymbolName: imageName, accessibilityDescription: "ProjectBar")
         image?.isTemplate = true
         button.image = image
-        button.title = title
-        button.setAccessibilityValue(title.trimmingCharacters(in: .whitespaces))
+        button.title = board.statusItemTitle.isEmpty ? "" : " \(board.statusItemTitle)"
+        button.toolTip = board.statusItemTitle.isEmpty ? "ProjectBar — add your first project" : board.statusItemTitle
+        button.setAccessibilityValue(board.statusItemTitle)
     }
 
     private func updatePopoverSize() {
@@ -160,6 +156,9 @@ final class StatusItemController: NSObject {
     }
 
     private var desiredPopoverSize: NSSize {
-        NSSize(width: 812, height: self.store.projects.isEmpty ? 420 : 640)
+        let screen = self.statusItem.button?.window?.screen ?? NSScreen.main
+        return ProjectBoardLayout.popoverSize(
+            available: screen?.visibleFrame.size ?? NSSize(width: 836, height: 752),
+            isEmpty: self.store.projects.isEmpty)
     }
 }
